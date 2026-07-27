@@ -23,6 +23,7 @@ static std::string extract_argvs(int argc, char **argv)
     for (int i = 1; i < argc; i++)
     {
         string += argv[i];
+        string += ' ';
     }
     for (std::size_t i = 0; i < string.size(); i++) {
         string[i] = std::tolower(string[i]);
