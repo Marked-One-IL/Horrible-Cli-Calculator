@@ -1,1 +1,1 @@
-![Job](pic.png)
+![Job](assets/pic.png)
