@@ -38,7 +38,8 @@ int main(int argc, char **argv)
     {
         try
         {
-            std::vector<Lexer::Token> tokens = Lexer::build(extract_argvs(argc, argv));
+            std::string string = extract_argvs(argc, argv);
+            std::vector<Lexer::Token> tokens = Lexer::build(string);
             double results = Parser::solve(tokens);
             std::cout << std::fixed << std::setprecision(2) << results << '\n';
         }
