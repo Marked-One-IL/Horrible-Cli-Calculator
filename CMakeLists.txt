@@ -15,3 +15,4 @@ set(CMAKE_CXX_STANDARD_REQUIRED OFF) # If C++26 standard is not supported go to 
 set(CMAKE_CXX_EXTENSIONS OFF) # Remove compiler specific extensions for portability.
 target_include_directories(${PROJECT_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/include) # Removed the need to do #include "include/example.h" which let you simply do #include "example.h".
 target_compile_definitions(${PROJECT_NAME} PRIVATE PROJECT_ROOT="${PROJECT_SOURCE_DIR}") # Insert a macro like this - #define PROJECT_ROOT "**Absloute path to the project root**"
+target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_20)
