@@ -1,0 +1,7 @@
+[package]
+name = "Horrible-Cli-Calculator"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+lexical-core = "1"
