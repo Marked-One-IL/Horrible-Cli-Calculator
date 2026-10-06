@@ -38,7 +38,7 @@ impl Error {
     
     pub fn print(&self, full_expr: &str, tokens: &Vec<Token>) 
     {
-        lexer::Error::new(self.msg, tokens[self.pos].pos).print(full_expr)
+        lexer::Error::new(self.msg, tokens[std::cmp::min(self.pos, tokens.len() - 1)].pos).print(full_expr)
     }
 }
 
