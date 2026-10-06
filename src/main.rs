@@ -20,16 +20,16 @@ fn get_argv_input() -> Option<String>
 }
 fn execute(expr: &str) 
 {
-    match lexer::extract_tokens(expr)
-    {
+    match lexer::extract_tokens(expr) {
         Ok(tokens) => {
-            match parser::solve(&tokens)
-            {
+            match parser::solve(&tokens) {
                 Ok(val) =>  println!("{}", val),
-                Err(msg) => println!("{}", msg)
+                Err(msg) => msg.print(expr, &tokens),
             }
         }
-        Err(msg) => println!("{}", msg)
+        Err(err) => {
+            err.print(expr);
+        }
     }
 }
 
