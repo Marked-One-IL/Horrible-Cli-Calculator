@@ -45,13 +45,14 @@ impl Error {
     
     pub fn print(&self, full_expr: &str, tokens: &Vec<Token>) 
     {
-        lexer::Error::new(self.msg, tokens[std::cmp::min(self.pos, tokens.len() - 1)].pos).print(full_expr)
+        if tokens.is_empty() { println!("{}", self.msg) }
+        else { lexer::Error::new(self.msg, tokens[std::cmp::min(self.pos, tokens.len() - 1)].pos).print(full_expr) }
     }
 }
 
 pub fn solve(tokens: &Vec<Token>) -> Result<f64, Error>
 {
-    if tokens.is_empty() { return Err( Error::new("A binary expression must have a right expression", 0)) }
+    if tokens.is_empty() { return Err( Error::new("No expression", 0)) }
     solve_helper(&build_all(tokens, &mut 0, tokens.len() - 1, Level::No)?)
 }
 
