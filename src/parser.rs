@@ -15,6 +15,13 @@ enum AstContent {
     Call(Func),                      // foo(x, ...)
     Val(f64)                         // num
 }
+#[derive(PartialEq, PartialOrd)]
+enum Level {
+    No,
+    L1,
+    L2
+}
+
 struct Ast {
     pub content: AstContent,
     pub pos: usize
@@ -45,7 +52,7 @@ impl Error {
 pub fn solve(tokens: &Vec<Token>) -> Result<f64, Error>
 {
     if tokens.is_empty() { return Err( Error::new("A binary expression must have a right expression", 0)) }
-    solve_helper(&build_all(tokens, &mut 0, tokens.len() - 1, false)?)
+    solve_helper(&build_all(tokens, &mut 0, tokens.len() - 1, Level::No)?)
 }
 
 fn solve_helper(ast: &Box<Ast>) -> Result<f64, Error>
@@ -60,8 +67,14 @@ fn solve_helper(ast: &Box<Ast>) -> Result<f64, Error>
                 Symbol::Plus => Ok(left_v + right_v),
                 Symbol::Min  => Ok(left_v - right_v),
                 Symbol::Mul  => Ok(left_v * right_v),
-                Symbol::Div  => Ok(left_v / right_v),
-                Symbol::Mod  => Ok(left_v % right_v),
+                Symbol::Div  => {
+                    if right_v == 0.0 { return Err( Error::new("Divison by 0.0", right.pos) ) }
+                    Ok(left_v / right_v)
+                }
+                Symbol::Mod  => {
+                    if right_v == 0.0 { return Err( Error::new("Modulo by 0.0", right.pos) ) }
+                    Ok(left_v % right_v)
+                }
                 _ => unreachable!()
             }
         }
@@ -97,6 +110,13 @@ fn solve_helper(ast: &Box<Ast>) -> Result<f64, Error>
                 Func::Tan(param) => 
                 {
                     let param_v = solve_helper(&param)?;
+                    
+                    const EPSILON: f64 = 2.2204460492503131e-16;
+                    let reduced = param_v % 180.0;
+                    if (reduced.abs() - 90.0).abs() < EPSILON {
+                        return Err( Error::new("For tan(x): x != 90 + 180k", param.pos) )
+                    }
+
                     Ok(f64::tan(param_v.to_radians()))
                 },
                 Func::Pow(param1, param2) => 
@@ -109,7 +129,7 @@ fn solve_helper(ast: &Box<Ast>) -> Result<f64, Error>
                 {
                     let param1_v = solve_helper(&param1)?;
                     let param2_v = solve_helper(&param2)?;
-                    if param1_v < 0.0 || param1_v == 1.0 { return Err( Error::new("For log(x, ...): x > 0.0 and x != 1.0", param1.pos) ) }
+                    if param1_v <= 0.0 || param1_v == 1.0 { return Err( Error::new("For log(x, ...): x > 0.0 and x != 1.0", param1.pos) ) }
                     if param2_v <= 0.0 { return Err( Error::new("For log(..., x): x > 0.0", param2.pos) ) }
 
                     Ok(f64::log10(param2_v) / f64::log10(param1_v))
@@ -120,7 +140,7 @@ fn solve_helper(ast: &Box<Ast>) -> Result<f64, Error>
     }
 }
 
-fn build_all(tokens: &Vec<Token>, start: &mut usize, end: usize, was_super: bool) -> Result<Box<Ast>, Error>
+fn build_all(tokens: &Vec<Token>, start: &mut usize, end: usize, prev_level: Level) -> Result<Box<Ast>, Error>
 {
     let mut left = build_single(tokens, start, end)?;
 
@@ -128,16 +148,16 @@ fn build_all(tokens: &Vec<Token>, start: &mut usize, end: usize, was_super: bool
     {
         let TokenContent::Symbol(symbol) = tokens[*start].content else { return Err( Error::new("A binary expression must have a symbol operation", *start) ) };
 
-        let is_curr_super = match symbol {
-            Symbol::Plus | Symbol::Min => Ok(false),
-            Symbol::Mul  | Symbol::Div | Symbol::Mod => Ok(true),
+        let curr_level = match symbol {
+            Symbol::Plus | Symbol::Min => Ok(Level::L1),
+            Symbol::Mul  | Symbol::Div | Symbol::Mod => Ok(Level::L2),
             _ => Err( Error::new("Invalid binary operation symbol", *start) ) }?;
 
-        if !is_curr_super && was_super { break }
+        if curr_level <= prev_level { break }
         *start += 1;
         if *start > end { return Err( Error::new("A binary expression must have a right expression", *start) ) }
 
-        left = Box::new(Ast::new(AstContent::Bin(left, symbol, build_all(tokens, start, end, is_curr_super)?), *start));
+        left = Box::new(Ast::new(AstContent::Bin(left, symbol, build_all(tokens, start, end, curr_level)?), *start));
     }
 
     Ok(left)
@@ -173,9 +193,12 @@ fn build_call(tokens: &Vec<Token>, start: &mut usize, end: usize) -> Result<Opti
     let TokenContent::Name(name) = tokens[*start].content else { return Ok(None) };
     *start += 1;
 
-    if let TokenContent::Symbol(first_symbol) = tokens.get(*start).ok_or(Error::new("A function call expression after the function name must have a symbol", *start))?.content {
+    if let TokenContent::Symbol(first_symbol) = tokens.get(*start).ok_or(Error::new("A function call with nothing after", *start))?.content {
         *start += 1;
         if first_symbol != Symbol::ParStart { return Err( Error::new("A function call expression after the function name must have a symbol of '('", *start) ) }
+    } 
+    else {
+        return Err( Error::new("A function call expression after the function name must have a symbol", *start) )
     }
 
     match name {
@@ -223,7 +246,7 @@ fn build_sub_general(tokens: &Vec<Token>, start: &mut usize, end: usize, no_end_
     *start = end_par_v + 1;
     if t_start > t_end { return Err( Error::new(empty_err, *start) ) }
 
-    build_all(tokens, &mut t_start, t_end, false)
+    build_all(tokens, &mut t_start, t_end, Level::No)
 }
 fn build_1_params(tokens: &Vec<Token>, start: &mut usize, end: usize) -> Result<Box<Ast>, Error>
 {
@@ -262,8 +285,8 @@ fn build_2_params(tokens: &Vec<Token>, start: &mut usize, end: usize) -> Result<
     *start = end_par_v + 1;
     if t_start2 > t_end2 { return Err( Error::new("A function call expression second parameter must have an expression", *start) ) }
 
-    let param1_expr = build_all(tokens, &mut t_start1, t_end1, false)?;
-    let param2_expr = build_all(tokens, &mut t_start2, t_end2, false)?;
+    let param1_expr = build_all(tokens, &mut t_start1, t_end1, Level::No)?;
+    let param2_expr = build_all(tokens, &mut t_start2, t_end2, Level::No)?;
 
     Ok((param1_expr, param2_expr))
 }
