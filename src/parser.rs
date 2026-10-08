@@ -1,13 +1,13 @@
 use crate::lexer::{self, Symbol, Token, TokenContent};
-use core::f64;
 
 enum Func {
+    Abs(Box<Ast>),           // abs(x)
     Sqrt(Box<Ast>),          // sqrt(x)
     Sin(Box<Ast>),           // sin(x)
     Cos(Box<Ast>),           // cos(x)
     Tan(Box<Ast>),           // tan(x)
-    Pow(Box<Ast>, Box<Ast>), // pow(x, e)
-    Log(Box<Ast>, Box<Ast>)  // log(x, p)
+    Pow(Box<Ast>, Box<Ast>), // pow(b, e)
+    Log(Box<Ast>, Box<Ast>)  // log(b, x)
 }
 enum AstContent {
     Bin(Box<Ast>, Symbol, Box<Ast>), // () symbol ()
@@ -19,7 +19,21 @@ enum AstContent {
 enum Level {
     No,
     L1,
-    L2
+    L2,
+    L3
+}
+
+// Raw float math are not accurate.
+// One infamous example: (0.1 + 0.2 == 0.3) produce false.
+// This attempt to make it more accurate.
+fn ep_eq(x: f64, y: f64) -> bool {
+    (x - y).abs() <= f64::EPSILON
+}
+fn ep_leq(x: f64, y: f64) -> bool {
+    (x < y) || ep_eq(x, y)
+}
+fn ep_heq(x: f64, y: f64) -> bool {
+    (x > y) || ep_eq(x, y)
 }
 
 struct Ast {
@@ -43,14 +57,14 @@ impl Error {
         Self { msg, pos }
     }
     
-    pub fn print(&self, full_expr: &str, tokens: &Vec<Token>) 
+    pub fn print(&self, full_expr: &str, tokens: &[Token]) 
     {
         if tokens.is_empty() { println!("{}", self.msg) }
         else { lexer::Error::new(self.msg, tokens[std::cmp::min(self.pos, tokens.len() - 1)].pos).print(full_expr) }
     }
 }
 
-pub fn solve(tokens: &Vec<Token>) -> Result<f64, Error>
+pub fn solve(tokens: &[Token]) -> Result<f64, Error>
 {
     if tokens.is_empty() { return Err( Error::new("No expression", 0)) }
     solve_helper(&build_all(tokens, &mut 0, tokens.len() - 1, Level::No)?)
@@ -65,10 +79,16 @@ fn solve_helper(ast: &Box<Ast>) -> Result<f64, Error>
             let right_v = solve_helper(&right)?;
 
             match opr {
-                Symbol::Plus => Ok(left_v + right_v),
-                Symbol::Min  => Ok(left_v - right_v),
-                Symbol::Mul  => Ok(left_v * right_v),
-                Symbol::Div  => {
+                Symbol::Low    => Ok((left_v < right_v)      as u8 as f64),
+                Symbol::LowEq  => Ok(ep_leq(left_v, right_v) as u8 as f64),
+                Symbol::Eq     => Ok(ep_eq(left_v, right_v)  as u8 as f64),
+                Symbol::Neq    => Ok(!ep_eq(left_v, right_v) as u8 as f64),
+                Symbol::HighEq => Ok(ep_heq(left_v, right_v) as u8 as f64),
+                Symbol::High   => Ok((left_v > right_v)      as u8 as f64),
+                Symbol::Plus   => Ok(left_v + right_v),
+                Symbol::Min    => Ok(left_v - right_v),
+                Symbol::Mul    => Ok(left_v * right_v),
+                Symbol::Div    => {
                     if right_v == 0.0 { return Err( Error::new("Divison by 0.0", right.pos) ) }
                     Ok(left_v / right_v)
                 }
@@ -85,53 +105,60 @@ fn solve_helper(ast: &Box<Ast>) -> Result<f64, Error>
 
             match opr {
                 Symbol::Plus => Ok(expr_v),
-                Symbol::Min  => Ok(-expr_v),
+                Symbol::Min  => {
+                    if ep_eq(expr_v, 0.0) { return Ok(0.0) } // This prevents 0.0 becoming -0.0 (Stupid floating stuff (Which doesn't really matter tbh)). 
+                    Ok(-expr_v) 
+                }
+                Symbol::Ex => Ok(!(expr_v > 0.0) as u8 as f64),
                 _ => unreachable!()
             }
         }
-        AstContent::Call(func) => 
+        AstContent::Call(func) =>
         {
             match func {
-                Func::Sqrt(param) => 
+                Func::Abs(param) =>
+                {
+                    Ok(f64::abs(solve_helper(&param)?))
+                }
+                Func::Sqrt(param) =>
                 {
                     let param_v = solve_helper(&param)?;
                     if param_v < 0.0 { return Err( Error::new("For sqrt(x): x >= 0.0", param.pos) ) }
                     Ok(f64::sqrt(param_v))
-                },
-                Func::Sin(param) => 
+                }
+                Func::Sin(param) =>
                 {
                     let param_v = solve_helper(&param)?;
                     Ok(f64::sin(param_v.to_radians()))
-                },
-                Func::Cos(param) => 
+                }
+                Func::Cos(param) =>
                 {
                     let param_v = solve_helper(&param)?;
                     Ok(f64::cos(param_v.to_radians()))
-                },
-                Func::Tan(param) => 
+                }
+                Func::Tan(param) =>
                 {
                     let param_v = solve_helper(&param)?;
                     
-                    const EPSILON: f64 = 2.2204460492503131e-16;
                     let reduced = param_v % 180.0;
-                    if (reduced.abs() - 90.0).abs() < EPSILON {
+                    if ep_eq(reduced.abs(), 90.0) {
                         return Err( Error::new("For tan(x): x != 90 + 180k", param.pos) )
                     }
 
                     Ok(f64::tan(param_v.to_radians()))
-                },
-                Func::Pow(param1, param2) => 
+                }
+                Func::Pow(param1, param2) =>
                 {
                     let param1_v = solve_helper(&param1)?;
                     let param2_v = solve_helper(&param2)?;
                     Ok(f64::powf(param1_v, param2_v))
                 }
-                Func::Log(param1, param2) => 
+                Func::Log(param1, param2) =>
                 {
                     let param1_v = solve_helper(&param1)?;
                     let param2_v = solve_helper(&param2)?;
-                    if param1_v <= 0.0 || param1_v == 1.0 { return Err( Error::new("For log(x, ...): x > 0.0 and x != 1.0", param1.pos) ) }
-                    if param2_v <= 0.0 { return Err( Error::new("For log(..., x): x > 0.0", param2.pos) ) }
+                    if ep_leq(param1_v, 0.0) || ep_eq(param1_v, 1.0) { return Err( Error::new("For log(x, ...): x > 0.0 and x != 1.0", param1.pos) ) }
+                    if ep_leq(param2_v, 0.0) { return Err( Error::new("For log(..., x): x > 0.0", param2.pos) ) }
 
                     Ok(f64::log10(param2_v) / f64::log10(param1_v))
                 }
@@ -141,7 +168,7 @@ fn solve_helper(ast: &Box<Ast>) -> Result<f64, Error>
     }
 }
 
-fn build_all(tokens: &Vec<Token>, start: &mut usize, end: usize, prev_level: Level) -> Result<Box<Ast>, Error>
+fn build_all(tokens: &[Token], start: &mut usize, end: usize, prev_level: Level) -> Result<Box<Ast>, Error>
 {
     let mut left = build_single(tokens, start, end)?;
 
@@ -150,8 +177,9 @@ fn build_all(tokens: &Vec<Token>, start: &mut usize, end: usize, prev_level: Lev
         let TokenContent::Symbol(symbol) = tokens[*start].content else { return Err( Error::new("A binary expression must have a symbol operation", *start) ) };
 
         let curr_level = match symbol {
-            Symbol::Plus | Symbol::Min => Ok(Level::L1),
-            Symbol::Mul  | Symbol::Div | Symbol::Mod => Ok(Level::L2),
+            Symbol::Low  | Symbol::LowEq | Symbol::Eq | Symbol::Neq | Symbol::HighEq | Symbol::High => Ok(Level::L1),
+            Symbol::Plus | Symbol::Min => Ok(Level::L2),
+            Symbol::Mul  | Symbol::Div | Symbol::Mod => Ok(Level::L3),
             _ => Err( Error::new("Invalid binary operation symbol", *start) ) }?;
 
         if curr_level <= prev_level { break }
@@ -163,7 +191,7 @@ fn build_all(tokens: &Vec<Token>, start: &mut usize, end: usize, prev_level: Lev
 
     Ok(left)
 }
-fn build_single(tokens: &Vec<Token>, start: &mut usize, end: usize) -> Result<Box<Ast>, Error>
+fn build_single(tokens: &[Token], start: &mut usize, end: usize) -> Result<Box<Ast>, Error>
 {
     if let Some(unary) = build_unary(tokens, start, end)? { return Ok(unary) }
     else if let Some(sub) = build_sub(tokens, start, end)? { return Ok(sub) }
@@ -172,16 +200,16 @@ fn build_single(tokens: &Vec<Token>, start: &mut usize, end: usize) -> Result<Bo
 
     Err( Error::new("Invalid expression structure", *start) )
 }
-fn build_unary(tokens: &Vec<Token>, start: &mut usize, end: usize) -> Result<Option<Box<Ast>>, Error>
+fn build_unary(tokens: &[Token], start: &mut usize, end: usize) -> Result<Option<Box<Ast>>, Error>
 {
     let TokenContent::Symbol(symbol) = tokens[*start].content else { return Ok(None) }; 
-    if symbol != Symbol::Plus && symbol != Symbol::Min { return Ok(None) }
+    if symbol != Symbol::Plus && symbol != Symbol::Min && symbol != Symbol::Ex { return Ok(None) }
     *start += 1;
     if *start > end { return Err( Error::new("An unary expression must have an actual expression", *start) ) }
 
     Ok(Some(Box::new(Ast::new(AstContent::Unary(symbol, build_single(tokens, start, end)?), *start))))
 }
-fn build_sub(tokens: &Vec<Token>, start: &mut usize, end: usize) -> Result<Option<Box<Ast>>, Error>
+fn build_sub(tokens: &[Token], start: &mut usize, end: usize) -> Result<Option<Box<Ast>>, Error>
 {
     let TokenContent::Symbol(first_symbol) = tokens[*start].content else { return Ok(None) };
     if first_symbol != Symbol::ParStart { return Ok(None) }   
@@ -189,7 +217,7 @@ fn build_sub(tokens: &Vec<Token>, start: &mut usize, end: usize) -> Result<Optio
 
     Ok(Some(build_sub_general(tokens, start, end, "A sub expression must end with a ')'", "A sub expression must have an actual expression")?))
 }
-fn build_call(tokens: &Vec<Token>, start: &mut usize, end: usize) -> Result<Option<Box<Ast>>, Error>
+fn build_call(tokens: &[Token], start: &mut usize, end: usize) -> Result<Option<Box<Ast>>, Error>
 {
     let TokenContent::Name(name) = tokens[*start].content else { return Ok(None) };
     *start += 1;
@@ -203,6 +231,7 @@ fn build_call(tokens: &Vec<Token>, start: &mut usize, end: usize) -> Result<Opti
     }
 
     match name {
+        "abs" => { Ok(Some(Box::new(Ast::new(AstContent::Call(Func::Abs( build_1_params(tokens, start, end)? )), *start)))) }
         "sqrt" => { Ok(Some(Box::new(Ast::new(AstContent::Call(Func::Sqrt( build_1_params(tokens, start, end)? )), *start)))) }
         "sin" => { Ok(Some(Box::new(Ast::new(AstContent::Call(Func::Sin( build_1_params(tokens, start, end)? )), *start)))) }
         "cos" => { Ok(Some(Box::new(Ast::new(AstContent::Call(Func::Cos( build_1_params(tokens, start, end)? )), *start)))) }
@@ -218,14 +247,14 @@ fn build_call(tokens: &Vec<Token>, start: &mut usize, end: usize) -> Result<Opti
         _ => { Err( Error::new("Invalid function name", *start) ) }
     }
 }
-fn build_val(tokens: &Vec<Token>, start: &mut usize) -> Result<Option<Box<Ast>>, Error>
+fn build_val(tokens: &[Token], start: &mut usize) -> Result<Option<Box<Ast>>, Error>
 {
     let TokenContent::Num(num) = tokens[*start].content else { return Ok(None) };
     *start += 1;
     Ok(Some(Box::new(Ast::new(AstContent::Val(num), *start))))
 }
 
-fn build_sub_general(tokens: &Vec<Token>, start: &mut usize, end: usize, no_end_err: &'static str, empty_err: &'static str) -> Result<Box<Ast>, Error>
+fn build_sub_general(tokens: &[Token], start: &mut usize, end: usize, no_end_err: &'static str, empty_err: &'static str) -> Result<Box<Ast>, Error>
 {
     let mut level: usize = 0;
     let mut end_par: Option<usize> = None;
@@ -249,11 +278,11 @@ fn build_sub_general(tokens: &Vec<Token>, start: &mut usize, end: usize, no_end_
 
     build_all(tokens, &mut t_start, t_end, Level::No)
 }
-fn build_1_params(tokens: &Vec<Token>, start: &mut usize, end: usize) -> Result<Box<Ast>, Error>
+fn build_1_params(tokens: &[Token], start: &mut usize, end: usize) -> Result<Box<Ast>, Error>
 {
     build_sub_general(tokens, start, end, "A function call expression must end with a ')'", "A function call expression must have a parameter expression")
 }
-fn build_2_params(tokens: &Vec<Token>, start: &mut usize, end: usize) -> Result<(Box<Ast>, Box<Ast>), Error>
+fn build_2_params(tokens: &[Token], start: &mut usize, end: usize) -> Result<(Box<Ast>, Box<Ast>), Error>
 {
     let mut level: usize = 0;
     let mut end_par: Option<usize> = None;

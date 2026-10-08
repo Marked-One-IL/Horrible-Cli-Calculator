@@ -1,13 +1,20 @@
 #[derive(PartialEq, Clone, Copy)]
 pub enum Symbol {
-    Plus,
-    Min,
-    Mul,
-    Div,
-    Mod,
-    ParStart,
-    ParEnd,
-    Comma
+    Low,      // <
+    LowEq,    // <=
+    Eq,       // ==
+    Neq,      // !=
+    HighEq,   // >=
+    High,     // >
+    Ex,       // !
+    Plus,     // +
+    Min,      // -
+    Mul,      // *
+    Div,      // /
+    Mod,      // %
+    ParStart, // (
+    ParEnd,   // )
+    Comma     // ,
 }
 pub enum TokenContent<'expr>
 {
@@ -66,20 +73,28 @@ pub fn extract_tokens<'expr>(expr: &'expr str) -> Result<Vec<Token<'expr>>, Erro
 
 fn extract_symbol(expr: &mut &str) -> Option<Symbol> 
 {
-    let symbol = match *expr.as_bytes().first().unwrap() {
-        b'+' => Some(Symbol::Plus),
-        b'-' => Some(Symbol::Min), 
-        b'*' => Some(Symbol::Mul),
-        b'/' => Some(Symbol::Div),
-        b'%' => Some(Symbol::Mod),
-        b'(' => Some(Symbol::ParStart),
-        b')' => Some(Symbol::ParEnd),
-        b',' => Some(Symbol::Comma),
-        _ => return None
-    };
+    static SYMBOLS_2: [(&'static str, Symbol); 4] =
+    [("<=", Symbol::LowEq), ("==", Symbol::Eq), ("!=", Symbol::Neq), (">=", Symbol::HighEq)];
 
-    *expr = &expr[1..];
-    symbol
+    static SYMBOLS_1: [(&'static str, Symbol); 11] =
+    [("<", Symbol::Low), (">", Symbol::High),  ("!", Symbol::Ex),
+    ("+", Symbol::Plus), ("-", Symbol::Min), ("*", Symbol::Mul), ("/", Symbol::Div), ("%", Symbol::Mod),
+    ("(", Symbol::ParStart), (")", Symbol::ParEnd), (",", Symbol::Comma)];
+
+    for symbol in SYMBOLS_2 {
+        if expr.starts_with(symbol.0) {
+            *expr = &expr[symbol.0.len()..];
+            return Some(symbol.1)
+        }
+    }
+    for symbol in SYMBOLS_1 {
+        if expr.starts_with(symbol.0) {
+            *expr = &expr[symbol.0.len()..];
+            return Some(symbol.1)
+        }
+    }
+
+    None
 }
 fn extract_name<'expr>(expr: &mut &'expr str) -> Option<&'expr str> 
 {
