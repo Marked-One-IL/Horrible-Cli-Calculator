@@ -1,4 +1,5 @@
 use crate::lexer::{self, Symbol, Token, TokenContent};
+use console::style;
 
 enum Func {
     Abs(Box<Ast>),           // abs(x)
@@ -6,6 +7,8 @@ enum Func {
     Sin(Box<Ast>),           // sin(x)
     Cos(Box<Ast>),           // cos(x)
     Tan(Box<Ast>),           // tan(x)
+    Ln(Box<Ast>),            // ln(x)
+    Deg(Box<Ast>),           // deg(x) - radians to degrees.
     Pow(Box<Ast>, Box<Ast>), // pow(b, e)
     Log(Box<Ast>, Box<Ast>)  // log(b, x)
 }
@@ -22,20 +25,6 @@ enum Level {
     L2,
     L3
 }
-
-// Raw float math are not accurate.
-// One infamous example: (0.1 + 0.2 == 0.3) produce false.
-// This attempt to make it more accurate.
-fn ep_eq(x: f64, y: f64) -> bool {
-    (x - y).abs() <= f64::EPSILON
-}
-fn ep_leq(x: f64, y: f64) -> bool {
-    (x < y) || ep_eq(x, y)
-}
-fn ep_heq(x: f64, y: f64) -> bool {
-    (x > y) || ep_eq(x, y)
-}
-
 struct Ast {
     pub content: AstContent,
     pub pos: usize
@@ -59,17 +48,34 @@ impl Error {
     
     pub fn print(&self, full_expr: &str, tokens: &[Token]) 
     {
-        if tokens.is_empty() { println!("{}", self.msg) }
+        if tokens.is_empty() { println!("{}", style(self.msg).red()) }
         else { lexer::Error::new(self.msg, tokens[std::cmp::min(self.pos, tokens.len() - 1)].pos).print(full_expr) }
     }
+}
+
+// Raw float math are not accurate.
+// One infamous example: (0.1 + 0.2 == 0.3) produce false.
+// This attempt to make it more accurate.
+fn ep_eq(x: f64, y: f64) -> bool {
+    (x - y).abs() <= 1e-10
+}
+fn ep_leq(x: f64, y: f64) -> bool {
+    (x < y) || ep_eq(x, y)
+}
+fn ep_heq(x: f64, y: f64) -> bool {
+    (x > y) || ep_eq(x, y)
 }
 
 pub fn solve(tokens: &[Token]) -> Result<f64, Error>
 {
     if tokens.is_empty() { return Err( Error::new("No expression", 0)) }
-    solve_helper(&build_all(tokens, &mut 0, tokens.len() - 1, Level::No)?)
-}
+    let res = solve_helper(&build_all(tokens, &mut 0, tokens.len() - 1, Level::No)?)?;
 
+    if ep_eq(res, 0.0) { // Prevents returning -0.0 (Which looks nicer).
+        return Ok(0.0)
+    }
+    Ok(res)
+}
 fn solve_helper(ast: &Box<Ast>) -> Result<f64, Error>
 {
     match &ast.content {
@@ -146,6 +152,18 @@ fn solve_helper(ast: &Box<Ast>) -> Result<f64, Error>
                     }
 
                     Ok(f64::tan(param_v.to_radians()))
+                }
+                Func::Ln(param) =>
+                {
+                    let param_v = solve_helper(param)?;
+                    if ep_leq(param_v, 0.0) { return Err( Error::new("For ln(x): x > 0.0", param.pos) ) }
+
+                    Ok(f64::ln(param_v))
+                }
+                Func::Deg(param) =>
+                {
+                    let param_v = solve_helper(param)?;
+                    Ok(param_v.to_degrees())
                 }
                 Func::Pow(param1, param2) =>
                 {
@@ -236,6 +254,8 @@ fn build_call(tokens: &[Token], start: &mut usize, end: usize) -> Result<Option<
         "sin" => { Ok(Some(Box::new(Ast::new(AstContent::Call(Func::Sin( build_1_params(tokens, start, end)? )), *start)))) }
         "cos" => { Ok(Some(Box::new(Ast::new(AstContent::Call(Func::Cos( build_1_params(tokens, start, end)? )), *start)))) }
         "tan" => { Ok(Some(Box::new(Ast::new(AstContent::Call(Func::Tan( build_1_params(tokens, start, end)? )), *start)))) }
+        "ln" => { Ok(Some(Box::new(Ast::new(AstContent::Call(Func::Ln( build_1_params(tokens, start, end)? )), *start)))) }
+        "deg" => { Ok(Some(Box::new(Ast::new(AstContent::Call(Func::Deg( build_1_params(tokens, start, end)? )), *start)))) }
         "pow" => {
             let (param1, param2) = build_2_params(tokens, start, end)?;
             Ok(Some(Box::new(Ast::new(AstContent::Call(Func::Pow(param1, param2)), *start))))
